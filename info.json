@@ -1,0 +1,10 @@
+{
+    "name": "Performance Optimized Python Backend",
+    "social": [],
+    "source-code-repo": "https://github.com/your-username/rinha-backend-2025",
+    "langs": ["python"],
+    "storages": ["postgresql"],
+    "messaging": [],
+    "load-balancers": ["nginx"],
+    "other-technologies": ["fastapi", "uvicorn", "gunicorn", "asyncpg", "aiohttp", "circuit-breaker"]
+} 
