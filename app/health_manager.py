@@ -82,14 +82,21 @@ class SmartHealthManager:
             default_raw = await redis_client.get("health:default")
             fallback_raw = await redis_client.get("health:fallback")
 
-            default_health = json.loads(default_raw) if default_raw else {"failing": True}
-            fallback_health = json.loads(fallback_raw) if fallback_raw else {"failing": True}
+            default_health = json.loads(default_raw) if default_raw else {"failing": True, "minResponseTime": 9999}
+            fallback_health = json.loads(fallback_raw) if fallback_raw else {"failing": True, "minResponseTime": 9999}
 
-            if not default_health.get("failing"):
-                return "default"
-            if not fallback_health.get("failing"):
-                return "fallback"
-            return "default"  # Default to default processor
+            # Estimated profit per request = (1 - fee) / latency
+            DEFAULT_FEE = 0.05  # 5% fee
+            FALLBACK_FEE = 0.15  # 15% fee
+
+            # Protect against div-by-zero and absent keys
+            d_latency = max(default_health.get("minResponseTime", 9999), 1)
+            f_latency = max(fallback_health.get("minResponseTime", 9999), 1)
+
+            score_default = (0 if default_health.get("failing", True) else 1) * ((1 - DEFAULT_FEE) / d_latency)
+            score_fallback = (0 if fallback_health.get("failing", True) else 1) * ((1 - FALLBACK_FEE) / f_latency)
+
+            return "default" if score_default >= score_fallback else "fallback"
         except Exception as e:
             logger.error(f"Failed to get best processor from Redis: {e}")
             return "default"

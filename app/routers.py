@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, Response, Query
 from fastapi.responses import JSONResponse
 import time
 import logging
@@ -11,7 +11,7 @@ from .database import db
 logger = logging.getLogger(__name__)
 
 # Pre-allocate response templates for performance
-SUCCESS_RESPONSE = JSONResponse(content={"status": "ok"})
+SUCCESS_RESPONSE = Response(status_code=204)
 
 # Create routers
 payments_router = APIRouter(prefix="/payments", tags=["payments"])
@@ -59,13 +59,13 @@ async def process_payment(request: Request):
 
 @summary_router.get("")
 async def get_payments_summary(
-    from_time: Optional[str] = None,
-    to_time: Optional[str] = None
+    from_: Optional[str] = Query(None, alias="from"),
+    to: Optional[str] = Query(None, alias="to")
 ):
     """Get payments summary endpoint - optimized for performance"""
     try:
         # Get summary from database
-        summary = await db.get_summary_fast(from_time, to_time)
+        summary = await db.get_summary_fast(from_, to)
         
         # Return formatted response
         return JSONResponse(content=summary)

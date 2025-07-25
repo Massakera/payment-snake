@@ -48,9 +48,10 @@ class CircuitBreaker:
 
 class PaymentProcessor:
     def __init__(self):
+        # More aggressive thresholds to reduce time stuck on fallback
         self.circuit_breakers = {
-            'default': CircuitBreaker(),
-            'fallback': CircuitBreaker()
+            'default': CircuitBreaker(failure_threshold=3, recovery_timeout=5),
+            'fallback': CircuitBreaker(failure_threshold=3, recovery_timeout=5)
         }
         
         # Processor URLs
@@ -102,8 +103,9 @@ class PaymentProcessor:
                 if payments_to_write:
                     success = await db.insert_many_payments_fast(payments_to_write)
                     if not success:
-                        logger.error(f"Failed to write a batch of {len(payments_to_write)} payments to DB. Items will be lost.")
-                        # In a real-world scenario, you'd re-queue these or save to a dead-letter queue.
+                        logger.error(f"Failed to write a batch of {len(payments_to_write)} payments to DB. Re-queuing items.")
+                        # Push raw items back so we retry later (at-least-once guarantee)
+                        await health_manager_module.redis_client.rpush(DB_WRITE_QUEUE_KEY, *queue_data)
 
             except Exception as e:
                 logger.error(f"Error in DB writer worker: {e}")
