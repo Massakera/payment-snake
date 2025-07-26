@@ -164,17 +164,20 @@ class PaymentProcessor:
             result = await http_client.http_client.post_fast(url, payment_data)
             
             if result:
-                # Success: update circuit breaker and store in DB.
-                # CRITICAL: We MUST await the database write to guarantee consistency.
+                # Success: update circuit breaker and store in DB immediately for consistency
                 circuit_breaker.on_success()
-                # Push to Redis queue instead of writing to DB directly
-                payment_for_queue = {
-                    'correlation_id': correlation_id,
-                    'amount': str(amount),
-                    'processor': processor
-                }
-                await health_manager_module.redis_client.rpush(DB_WRITE_QUEUE_KEY, json.dumps(payment_for_queue))
-                logger.info(f"Payment {correlation_id} processed via {processor} and queued for DB write.")
+                write_ok = await db.insert_payment_fast(correlation_id, amount, processor)
+                if not write_ok:
+                    # Fall back to queue so we don't lose the record
+                    payment_for_queue = {
+                        'correlation_id': correlation_id,
+                        'amount': str(amount),
+                        'processor': processor
+                    }
+                    await health_manager_module.redis_client.rpush(DB_WRITE_QUEUE_KEY, json.dumps(payment_for_queue))
+                    logger.warning(f"DB insert failed for {correlation_id}. Payment queued for later persistence.")
+                else:
+                    logger.info(f"Payment {correlation_id} processed via {processor} and stored in DB.")
                 return True
             else:
                 # Failed - update circuit breaker

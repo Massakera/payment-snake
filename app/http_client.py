@@ -20,11 +20,11 @@ class UltraFastHTTPClient:
             force_close=False
         )
         
-        # Timeout para ser usado por requisição
+        # Mais agressivo: 400ms totais (100ms connect + 300ms read)
         self.timeout = aiohttp.ClientTimeout(
-            total=1.0,  # 1 segundo total
-            connect=0.2,  # 200ms para conectar
-            sock_read=0.8  # 800ms para ler
+            total=0.4,  # 400ms total
+            connect=0.1,  # 100ms para conectar
+            sock_read=0.3  # 300ms para ler
         )
         
         self.session = aiohttp.ClientSession(
