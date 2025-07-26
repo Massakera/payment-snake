@@ -158,26 +158,42 @@ class PaymentProcessor:
                 'amount': float(amount),
                 'requestedAt': datetime.now(timezone.utc).isoformat()
             }
-            
+
+            # Determine per-call timeout: 2× minResponseTime (ms) capped between 0.15s and 0.4s
+            min_rt_ms = 100
+            try:
+                raw = await health_manager_module.redis_client.get(f"health:{processor}")
+                if raw:
+                    min_rt_ms = json.loads(raw).get('minResponseTime', 100)
+            except Exception:
+                pass
+            per_call_timeout = max(0.15, min(0.4, (min_rt_ms * 2) / 1000))
+
             # Send to processor
             url = self.processors[processor]
-            result = await http_client.http_client.post_fast(url, payment_data)
+            result = await http_client.http_client.post_fast(url, payment_data, timeout_override=per_call_timeout)
             
             if result:
                 # Success: update circuit breaker and store in DB immediately for consistency
                 circuit_breaker.on_success()
-                write_ok = await db.insert_payment_fast(correlation_id, amount, processor)
-                if not write_ok:
-                    # Fall back to queue so we don't lose the record
-                    payment_for_queue = {
-                        'correlation_id': correlation_id,
-                        'amount': str(amount),
-                        'processor': processor
-                    }
-                    await health_manager_module.redis_client.rpush(DB_WRITE_QUEUE_KEY, json.dumps(payment_for_queue))
-                    logger.warning(f"DB insert failed for {correlation_id}. Payment queued for later persistence.")
-                else:
-                    logger.info(f"Payment {correlation_id} processed via {processor} and stored in DB.")
+                # Push to queue for async DB write
+                payment_for_queue = {
+                    'correlation_id': correlation_id,
+                    'amount': str(amount),
+                    'processor': processor
+                }
+                await health_manager_module.redis_client.rpush(DB_WRITE_QUEUE_KEY, json.dumps(payment_for_queue))
+
+                # Update real-time counters in Redis for instant consistency
+                try:
+                    pipe = health_manager_module.redis_client.pipeline(True)
+                    pipe.incr(f"summary:{processor}:total_requests", 1)
+                    pipe.incrbyfloat(f"summary:{processor}:total_amount", float(amount))
+                    await pipe.execute()
+                except Exception as e:
+                    logger.error(f"Failed to increment summary counters for {processor}: {e}")
+
+                logger.info(f"Payment {correlation_id} processed via {processor} and queued for DB write.")
                 return True
             else:
                 # Failed - update circuit breaker

@@ -41,18 +41,23 @@ class UltraFastHTTPClient:
             'Accept': 'application/json'
         }
     
-    async def post_fast(self, url: str, data: dict) -> Optional[dict]:
-        """Ultra-fast POST request with optimized JSON handling"""
+    async def post_fast(self, url: str, data: dict, timeout_override: Optional[float] = None) -> Optional[dict]:
+        """Ultra-fast POST request with optimized JSON handling.
+
+        timeout_override: seconds to override default timeout; if None uses self.timeout.
+        """
         try:
             # JSON serialization otimizada
             json_data = json.dumps(data, separators=(',', ':'))
-            
+
+            timeout_ctx = self.timeout if timeout_override is None else aiohttp.ClientTimeout(total=timeout_override)
+
             async with self.session.post(
                 url,
                 data=json_data,
                 headers=self.headers,
                 compress=False,  # Desabilita compressão para reduzir CPU
-                timeout=self.timeout
+                timeout=timeout_ctx
             ) as resp:
                 if resp.status == 200:
                     return await resp.json()

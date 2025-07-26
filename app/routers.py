@@ -7,6 +7,7 @@ from decimal import Decimal
 from .models import PaymentRequest, PaymentSummaryResponse
 from .payment_processor import payment_processor
 from .database import db
+from . import health_manager as health_manager_module
 
 logger = logging.getLogger(__name__)
 
@@ -64,8 +65,32 @@ async def get_payments_summary(
 ):
     """Get payments summary endpoint - optimized for performance"""
     try:
-        # Get summary from database
-        summary = await db.get_summary_fast(from_, to)
+        # If no time filters, use real-time counters from Redis for immediate consistency
+        if from_ is None and to is None and health_manager_module.redis_client:
+            try:
+                rc = health_manager_module.redis_client
+                default_requests, default_amount, fallback_requests, fallback_amount = await rc.mget(
+                    "summary:default:total_requests",
+                    "summary:default:total_amount",
+                    "summary:fallback:total_requests",
+                    "summary:fallback:total_amount",
+                )
+                summary = {
+                    'default': {
+                        'totalRequests': int(default_requests or 0),
+                        'totalAmount': float(default_amount or 0.0)
+                    },
+                    'fallback': {
+                        'totalRequests': int(fallback_requests or 0),
+                        'totalAmount': float(fallback_amount or 0.0)
+                    }
+                }
+            except Exception as e:
+                logger.error(f"Error reading redis summary: {e}")
+                summary = await db.get_summary_fast(from_, to)
+        else:
+            # Get summary from database when filters are applied
+            summary = await db.get_summary_fast(from_, to)
         
         # Return formatted response
         return JSONResponse(content=summary)
