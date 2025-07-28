@@ -1,1 +1,0 @@
-# Rinha Backend 2025 - Performance Optimized 

@@ -1,111 +1,84 @@
 services:
-  # Load balancer
   nginx:
     image: nginx:alpine
+    container_name: rinha-nginx
+    restart: unless-stopped
     ports:
       - "9999:80"
     volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx.conf:/etc/nginx/nginx.conf
     depends_on:
-      - app1
-      - app2
+      - backend-api-1
+      - backend-api-2
     networks:
+      - backend
       - payment-processor
     deploy:
       resources:
         limits:
-          cpus: "0.1"
-          memory: "50MB"
-    restart: unless-stopped
+          cpus: "0.2"
+          memory: "48MB"
 
-  # Application instance 1
-  app1:
-    build: .
-    image: rinha-sub-app:latest
-    container_name: rinha-app1
-    networks:
-      - payment-processor
+  backend-api-1: &api
+    image: ricassiocosta/rinha-backend-2025-python:v0.10.1
+    container_name: rinha-api-1
+    restart: unless-stopped
+    environment:
+      - PAYMENT_PROCESSOR_URL_DEFAULT=http://payment-processor-default:8080
+      - PAYMENT_PROCESSOR_URL_FALLBACK=http://payment-processor-fallback:8080
+      - REDIS_URL=redis://redis:6379/0
+      - MAX_PARALLELISM=8
     depends_on:
-      - postgres
       - redis
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: "100MB"
-    restart: unless-stopped
-    environment:
-      - PYTHONUNBUFFERED=1
-
-  # Application instance 2
-  app2:
-    build: .
-    image: rinha-sub-app:latest
-    container_name: rinha-app2
-    networks:
-      - payment-processor
-    depends_on:
-      - postgres
-      - redis
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: "100MB"
-    restart: unless-stopped
-    environment:
-      - PYTHONUNBUFFERED=1
-
-  # PostgreSQL database
-  postgres:
-    image: postgres:15-alpine
-    environment:
-      POSTGRES_DB: payments
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - redis-socket:/var/run/redis
     networks:
+      - backend
       - payment-processor
+    expose:
+      - "9999"
     deploy:
       resources:
         limits:
-          cpus: "0.3"
-          memory: "100MB"
-    restart: unless-stopped
-    command: >
-      postgres
-      -c shared_buffers=256MB
-      -c effective_cache_size=1GB
-      -c maintenance_work_mem=64MB
-      -c checkpoint_completion_target=0.9
-      -c wal_buffers=16MB
-      -c default_statistics_target=100
-      -c random_page_cost=1.1
-      -c effective_io_concurrency=200
-      -c work_mem=4MB
-      -c min_wal_size=1GB
-      -c max_wal_size=4GB
-      -c max_worker_processes=2
-      -c max_parallel_workers_per_gather=1
-      -c max_parallel_workers=2
-      -c max_parallel_maintenance_workers=1
+          cpus: "0.6"
+          memory: "108MB"
 
-  # Redis service
+  backend-api-2:
+    <<: *api
+    container_name: rinha-api-2
+
   redis:
     image: redis:7-alpine
+    container_name: rinha-redis
+    restart: unless-stopped
+    command: [
+        "sh",
+        "-c",
+        "mkdir -p /var/run/redis && \
+        redis-server \
+        --save '' \
+        --appendonly no \
+        --maxclients 5000 \
+        --unixsocket /var/run/redis/redis.sock \
+        --unixsocketperm 777 \
+        --port 0 \
+        --protected-mode no \
+        --hz 10",
+      ]
     networks:
-      - payment-processor
+      - backend
+    volumes:
+      - redis-socket:/var/run/redis
     deploy:
       resources:
         limits:
           cpus: "0.1"
-          memory: "30MB"
-    restart: unless-stopped
-
-volumes:
-  postgres_data:
+          memory: "86MB"
 
 networks:
+  backend:
+    driver: bridge
   payment-processor:
-    external: true 
+    external: true
+volumes:
+  redis-socket:
